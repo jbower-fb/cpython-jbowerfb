@@ -379,6 +379,12 @@ PyAPI_FUNC(PyObject *) PyType_GenericNew(PyTypeObject *,
                                                PyObject *, PyObject *);
 PyAPI_FUNC(unsigned int) PyType_ClearCache(void);
 PyAPI_FUNC(void) PyType_Modified(PyTypeObject *);
+PyAPI_FUNC(void) PyType_ModifiedNonRecurisve(PyTypeObject *);
+#ifdef NDEBUG
+static inline void _PyType_AssertDictKeysNotUsedBySubclasses(PyTypeObject *tp) {}
+#else
+extern void _PyType_AssertDictKeysNotUsedBySubclasses(PyTypeObject *tp);
+#endif
 
 /* Generic operations on objects */
 PyAPI_FUNC(PyObject *) PyObject_Repr(PyObject *);
@@ -509,6 +515,10 @@ given type object has a specified feature.
 
 /* Objects behave like an unbound method */
 #define Py_TPFLAGS_METHOD_DESCRIPTOR (1UL << 17)
+
+/* All instances of heap types with this unset use keys + values rather than a
+   dict for attributes.*/
+#define Py_TPFLAGS_NOT_ALL_INSTANCES_USE_VALUES (1UL << 18)
 
 /* Object has up-to-date type attribute cache */
 #define Py_TPFLAGS_VALID_VERSION_TAG  (1UL << 19)

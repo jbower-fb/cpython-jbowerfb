@@ -622,8 +622,8 @@ PyType_Unwatch(int watcher_id, PyObject* obj)
     return 0;
 }
 
-void
-PyType_Modified(PyTypeObject *type)
+static void
+type_modified(PyTypeObject *type, int recursive)
 {
     /* Invalidate any cached data for the specified type and all
        subclasses.  This function is called after the base
@@ -644,18 +644,20 @@ PyType_Modified(PyTypeObject *type)
         return;
     }
 
-    PyObject *subclasses = lookup_tp_subclasses(type);
-    if (subclasses != NULL) {
-        assert(PyDict_CheckExact(subclasses));
+    if (recursive) {
+        PyObject *subclasses = lookup_tp_subclasses(type);
+        if (subclasses != NULL) {
+            assert(PyDict_CheckExact(subclasses));
 
-        Py_ssize_t i = 0;
-        PyObject *ref;
-        while (PyDict_Next(subclasses, &i, NULL, &ref)) {
-            PyTypeObject *subclass = type_from_ref(ref);  // borrowed
-            if (subclass == NULL) {
-                continue;
+            Py_ssize_t i = 0;
+            PyObject *ref;
+            while (PyDict_Next(subclasses, &i, NULL, &ref)) {
+                PyTypeObject *subclass = type_from_ref(ref);  // borrowed
+                if (subclass == NULL) {
+                    continue;
+                }
+                PyType_Modified(subclass);
             }
-            PyType_Modified(subclass);
         }
     }
 
@@ -685,6 +687,55 @@ PyType_Modified(PyTypeObject *type)
         ((PyHeapTypeObject *)type)->_spec_cache.getitem = NULL;
     }
 }
+
+void
+PyType_Modified(PyTypeObject *type)
+{
+    type_modified(type, 1);
+}
+
+void
+PyType_ModifiedNonRecurisve(PyTypeObject *type)
+{
+    type_modified(type, 0);
+}
+
+#define CACHED_KEYS(tp) (((PyHeapTypeObject*)tp)->ht_cached_keys)
+
+#ifndef NDEBUG
+static void
+assert_keys_not_used_by_subclasses(
+        PyObject *subclasses, PyDictKeysObject *keys)
+{
+    if (subclasses == NULL) {
+        return;
+    }
+    assert(PyDict_CheckExact(subclasses));
+    Py_ssize_t i = 0;
+    PyObject *ref;
+    while (PyDict_Next(subclasses, &i, NULL, &ref)) {
+        assert(PyWeakref_CheckRef(ref));
+        PyObject *obj = PyWeakref_GET_OBJECT(ref);
+        assert(obj != NULL);
+        if (obj == Py_None) {
+            continue;
+        } \
+        assert(PyType_Check(obj));
+        PyTypeObject *subclass = _PyType_CAST(obj);
+        if (subclass == NULL) {
+            continue;
+        }
+        assert(CACHED_KEYS(subclass) != keys);
+        assert_keys_not_used_by_subclasses(subclass->tp_subclasses, keys);
+    }
+}
+
+void
+_PyType_AssertDictKeysNotUsedBySubclasses(PyTypeObject *tp)
+{
+    assert_keys_not_used_by_subclasses(tp->tp_subclasses, CACHED_KEYS(tp));
+}
+#endif
 
 static void
 type_mro_modified(PyTypeObject *type, PyObject *bases) {

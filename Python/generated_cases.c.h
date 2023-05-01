@@ -3434,15 +3434,15 @@
             PyObject *descr = read_obj(&next_instr[5].cache);
             #line 2426 "Python/bytecodes.c"
             /* Cached method object */
+#ifdef NDEBUG
+            (void)keys_version;
+#endif
             PyTypeObject *self_cls = Py_TYPE(self);
             assert(type_version != 0);
             DEOPT_IF(self_cls->tp_version_tag != type_version, LOAD_ATTR);
             assert(self_cls->tp_flags & Py_TPFLAGS_MANAGED_DICT);
-            PyDictOrValues dorv = *_PyObject_DictOrValuesPointer(self);
-            DEOPT_IF(!_PyDictOrValues_IsValues(dorv), LOAD_ATTR);
-            PyHeapTypeObject *self_heap_type = (PyHeapTypeObject *)self_cls;
-            DEOPT_IF(self_heap_type->ht_cached_keys->dk_version !=
-                     keys_version, LOAD_ATTR);
+            assert(_PyDictOrValues_IsValues(*_PyObject_DictOrValuesPointer(self)));
+            assert(((PyHeapTypeObject *)self_cls)->ht_cached_keys->dk_version == keys_version);
             STAT_INC(LOAD_ATTR, hit);
             assert(descr != NULL);
             res2 = Py_NewRef(descr);
