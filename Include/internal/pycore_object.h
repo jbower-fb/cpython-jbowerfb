@@ -357,6 +357,12 @@ _PyObject_DictOrValuesPointer(PyObject *obj)
     return ((PyDictOrValues *)obj)-3;
 }
 
+static inline PyObject *
+_PyObject_FromDictOrValuesPointer(PyDictOrValues *dorv)
+{
+    return (PyObject *)(dorv+3);
+}
+
 static inline int
 _PyDictOrValues_IsValues(PyDictOrValues dorv)
 {
@@ -381,6 +387,18 @@ static inline void
 _PyDictOrValues_SetValues(PyDictOrValues *ptr, PyDictValues *values)
 {
     ptr->values = ((char *)values) - 1;
+}
+
+static inline void
+_PyDictOrValues_SetDict(PyDictOrValues *ptr, PyObject *dict)
+{
+    ptr->dict = dict;
+    PyTypeObject* tp = Py_TYPE(_PyObject_FromDictOrValuesPointer(ptr));
+    if (!(tp->tp_flags & Py_TPFLAGS_NOT_ALL_INSTANCES_USE_SHARED_DICT_KEYS)) {
+        tp->tp_flags |= Py_TPFLAGS_NOT_ALL_INSTANCES_USE_SHARED_DICT_KEYS;
+        // Maybe this should be invoked by the caller once the type is in a stable state?
+        PyType_Modified(tp);
+    }
 }
 
 #define MANAGED_WEAKREF_OFFSET (((Py_ssize_t)sizeof(PyObject *))*-4)

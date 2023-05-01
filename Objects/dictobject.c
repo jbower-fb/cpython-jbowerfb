@@ -5413,13 +5413,18 @@ _PyObject_StoreInstanceAttribute(PyObject *obj, PyDictValues *values,
                               PyObject *name, PyObject *value)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    PyDictKeysObject *keys = CACHED_KEYS(Py_TYPE(obj));
+    PyTypeObject *tp = Py_TYPE(obj);
+    PyDictKeysObject *keys = CACHED_KEYS(tp);
     assert(keys != NULL);
     assert(values != NULL);
-    assert(Py_TYPE(obj)->tp_flags & Py_TPFLAGS_MANAGED_DICT);
+    assert(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT);
     Py_ssize_t ix = DKIX_EMPTY;
     if (PyUnicode_CheckExact(name)) {
+        uint32_t old_keys_version = ((PyHeapTypeObject *)tp)->ht_cached_keys->dk_version;
         ix = insert_into_dictkeys(keys, name);
+        if (((PyHeapTypeObject *)tp)->ht_cached_keys->dk_version != old_keys_version) {
+            PyType_Modified(tp);
+        }
     }
     if (ix == DKIX_EMPTY) {
 #ifdef Py_STATS
@@ -5440,7 +5445,7 @@ _PyObject_StoreInstanceAttribute(PyObject *obj, PyDictValues *values,
         if (dict == NULL) {
             return -1;
         }
-        _PyObject_DictOrValuesPointer(obj)->dict = dict;
+        _PyDictOrValues_SetDict(_PyObject_DictOrValuesPointer(obj), dict);
         if (value == NULL) {
             return PyDict_DelItem(dict, name);
         }
@@ -5625,7 +5630,7 @@ PyObject_GenericGetDict(PyObject *obj, void *context)
             dict = make_dict_from_instance_attributes(
                     interp, CACHED_KEYS(tp), values);
             if (dict != NULL) {
-                dorv_ptr->dict = dict;
+                _PyDictOrValues_SetDict(dorv_ptr, dict);
             }
         }
         else {
@@ -5680,11 +5685,16 @@ _PyObjectDict_SetItem(PyTypeObject *tp, PyObject **dictptr,
                 return -1;
             *dictptr = dict;
         }
+        int all_instances_share_keys = !(tp->tp_flags & Py_TPFLAGS_NOT_ALL_INSTANCES_USE_SHARED_DICT_KEYS);
         if (value == NULL) {
             res = PyDict_DelItem(dict, key);
         }
         else {
             res = PyDict_SetItem(dict, key, value);
+        }
+        if (all_instances_share_keys && cached != ((PyDictObject*)*dictptr)->ma_keys) {
+            tp->tp_flags |= Py_TPFLAGS_NOT_ALL_INSTANCES_USE_SHARED_DICT_KEYS;
+            PyType_Modified(tp);
         }
     } else {
         dict = *dictptr;

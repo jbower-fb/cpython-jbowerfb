@@ -357,6 +357,7 @@ _PyCode_Quicken(PyCodeObject *code)
 #define SPEC_FAIL_ATTR_CLASS_ATTR_SIMPLE 31
 #define SPEC_FAIL_ATTR_CLASS_ATTR_DESCRIPTOR 32
 #define SPEC_FAIL_ATTR_BUILTIN_CLASS_METHOD_OBJ 33
+#define SPEC_FAIL_ATTR_INSTANCES_NOT_USING_SHARED_DICT_KEYS 34
 
 /* Binary subscr and store subscr */
 
@@ -1091,6 +1092,10 @@ PyObject *descr, DescriptorClassification kind)
         PyDictKeysObject *keys = ((PyHeapTypeObject *)owner_cls)->ht_cached_keys;
         if (!_PyDictOrValues_IsValues(dorv)) {
             SPECIALIZATION_FAIL(LOAD_ATTR, SPEC_FAIL_ATTR_HAS_MANAGED_DICT);
+            return 0;
+        }
+        if (owner_cls->tp_flags & Py_TPFLAGS_NOT_ALL_INSTANCES_USE_SHARED_DICT_KEYS) {
+            SPECIALIZATION_FAIL(LOAD_ATTR, SPEC_FAIL_ATTR_INSTANCES_NOT_USING_SHARED_DICT_KEYS);
             return 0;
         }
         Py_ssize_t index = _PyDictKeys_StringLookup(keys, name);

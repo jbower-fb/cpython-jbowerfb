@@ -510,6 +510,10 @@ given type object has a specified feature.
 /* Objects behave like an unbound method */
 #define Py_TPFLAGS_METHOD_DESCRIPTOR (1UL << 17)
 
+/* All instances of heap types with this unset use shared dict keys. Thus, the shared
+   keys can be examined to find any instances of things like method shadowing. */
+#define Py_TPFLAGS_NOT_ALL_INSTANCES_USE_SHARED_DICT_KEYS (1UL << 18)
+
 /* Object has up-to-date type attribute cache */
 #define Py_TPFLAGS_VALID_VERSION_TAG  (1UL << 19)
 
