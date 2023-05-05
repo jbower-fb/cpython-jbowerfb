@@ -805,7 +805,7 @@ _Py_Specialize_LoadAttr(PyObject *owner, _Py_CODEUNIT *instr, PyObject *name)
             if (version == 0) {
                 goto fail;
             }
-            write_u32(lm_cache->keys_version, version);
+            write_u32(lm_cache->func_version, version);
             assert(type->tp_version_tag != 0);
             write_u32(lm_cache->type_version, type->tp_version_tag);
             /* borrowed */
@@ -867,7 +867,7 @@ _Py_Specialize_LoadAttr(PyObject *owner, _Py_CODEUNIT *instr, PyObject *name)
             if (version == 0) {
                 goto fail;
             }
-            write_u32(lm_cache->keys_version, version);
+            write_u32(lm_cache->func_version, version);
             /* borrowed */
             write_obj(lm_cache->descr, descr);
             write_u32(lm_cache->type_version, type->tp_version_tag);
@@ -1104,7 +1104,9 @@ PyObject *descr, DescriptorClassification kind)
             SPECIALIZATION_FAIL(LOAD_ATTR, SPEC_FAIL_OUT_OF_VERSIONS);
             return 0;
         }
-        write_u32(cache->keys_version, keys_version);
+#ifndef NDEBUG
+        write_u32(cache->func_version, keys_version);
+#endif
         instr->op.code = LOAD_ATTR_METHOD_WITH_VALUES;
     }
     else {
