@@ -622,8 +622,8 @@ PyType_Unwatch(int watcher_id, PyObject* obj)
     return 0;
 }
 
-void
-PyType_Modified(PyTypeObject *type)
+static void
+type_modified(PyTypeObject *type, int recursive)
 {
     /* Invalidate any cached data for the specified type and all
        subclasses.  This function is called after the base
@@ -644,18 +644,20 @@ PyType_Modified(PyTypeObject *type)
         return;
     }
 
-    PyObject *subclasses = lookup_tp_subclasses(type);
-    if (subclasses != NULL) {
-        assert(PyDict_CheckExact(subclasses));
+    if (recursive) {
+        PyObject *subclasses = lookup_tp_subclasses(type);
+        if (subclasses != NULL) {
+            assert(PyDict_CheckExact(subclasses));
 
-        Py_ssize_t i = 0;
-        PyObject *ref;
-        while (PyDict_Next(subclasses, &i, NULL, &ref)) {
-            PyTypeObject *subclass = type_from_ref(ref);  // borrowed
-            if (subclass == NULL) {
-                continue;
+            Py_ssize_t i = 0;
+            PyObject *ref;
+            while (PyDict_Next(subclasses, &i, NULL, &ref)) {
+                PyTypeObject *subclass = type_from_ref(ref);  // borrowed
+                if (subclass == NULL) {
+                    continue;
+                }
+                PyType_Modified(subclass);
             }
-            PyType_Modified(subclass);
         }
     }
 
@@ -684,6 +686,18 @@ PyType_Modified(PyTypeObject *type)
         // comment on struct _specialization_cache):
         ((PyHeapTypeObject *)type)->_spec_cache.getitem = NULL;
     }
+}
+
+void
+PyType_Modified(PyTypeObject *type)
+{
+    type_modified(type, 1);
+}
+
+void
+PyType_ModifiedNonRecurisve(PyTypeObject *type)
+{
+    type_modified(type, 0);
 }
 
 static void

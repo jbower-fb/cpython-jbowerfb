@@ -5440,7 +5440,7 @@ _PyObject_StoreInstanceAttribute(PyObject *obj, PyDictValues *values,
         if (dict == NULL) {
             return -1;
         }
-        _PyObject_DictOrValuesPointer(obj)->dict = dict;
+        _PyDictOrValues_SetDict(_PyObject_DictOrValuesPointer(obj), dict);
         if (value == NULL) {
             return PyDict_DelItem(dict, name);
         }
@@ -5625,7 +5625,7 @@ PyObject_GenericGetDict(PyObject *obj, void *context)
             dict = make_dict_from_instance_attributes(
                     interp, CACHED_KEYS(tp), values);
             if (dict != NULL) {
-                dorv_ptr->dict = dict;
+                _PyDictOrValues_SetDict(dorv_ptr, dict);
             }
         }
         else {

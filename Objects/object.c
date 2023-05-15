@@ -1223,7 +1223,7 @@ _PyObject_GetDictPtr(PyObject *obj)
             PyErr_Clear();
             return NULL;
         }
-        dorv_ptr->dict = dict;
+        _PyDictOrValues_SetDict(dorv_ptr, dict);
     }
     return &dorv_ptr->dict;
 }
@@ -1422,7 +1422,7 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name,
                         res = NULL;
                         goto done;
                     }
-                    dorv_ptr->dict = dict;
+                    _PyDictOrValues_SetDict(dorv_ptr, dict);
                 }
             }
             else {
