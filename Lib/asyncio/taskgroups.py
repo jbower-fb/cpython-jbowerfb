@@ -4,12 +4,15 @@
 
 __all__ = ["TaskGroup"]
 
+import types
+
+from . import asyncgraph
 from . import events
 from . import exceptions
 from . import tasks
 
 
-class TaskGroup:
+class TaskGroup(asyncgraph.AsyncGraphAwaitable):
     """Asynchronous context manager for managing groups of tasks.
 
     Example use:
@@ -26,6 +29,8 @@ class TaskGroup:
     The exceptions are then combined and raised as an `ExceptionGroup`.
     """
     def __init__(self):
+        super().__init__()
+
         self._entered = False
         self._exiting = False
         self._aborting = False
@@ -36,6 +41,7 @@ class TaskGroup:
         self._errors = []
         self._base_error = None
         self._on_completed_fut = None
+        self._propagate_cancellation_error = None
 
     def __repr__(self):
         info = ['']
@@ -67,39 +73,7 @@ class TaskGroup:
 
         return self
 
-    async def __aexit__(self, et, exc, tb):
-        self._exiting = True
-
-        if (exc is not None and
-                self._is_base_error(exc) and
-                self._base_error is None):
-            self._base_error = exc
-
-        propagate_cancellation_error = \
-            exc if et is exceptions.CancelledError else None
-        if self._parent_cancel_requested:
-            # If this flag is set we *must* call uncancel().
-            if self._parent_task.uncancel() == 0:
-                # If there are no pending cancellations left,
-                # don't propagate CancelledError.
-                propagate_cancellation_error = None
-
-        if et is not None:
-            if not self._aborting:
-                # Our parent task is being cancelled:
-                #
-                #    async with TaskGroup() as g:
-                #        g.create_task(...)
-                #        await ...  # <- CancelledError
-                #
-                # or there's an exception in "async with":
-                #
-                #    async with TaskGroup() as g:
-                #        g.create_task(...)
-                #        1 / 0
-                #
-                self._abort()
-
+    async def _await_all(self):
         # We use while-loop here because "self._on_completed_fut"
         # can be cancelled multiple times if our parent task
         # is being cancelled repeatedly (or even once, when
@@ -120,10 +94,47 @@ class TaskGroup:
                     #
                     # "wrapper" is being cancelled while "foo" is
                     # still running.
-                    propagate_cancellation_error = ex
+                    self._propagate_cancellation_error = ex
                     self._abort()
 
-            self._on_completed_fut = None
+        self._on_completed_fut = None
+
+    async def __aexit__(self, et, exc, tb):
+        self._exiting = True
+
+        if (exc is not None and
+                self._is_base_error(exc) and
+                self._base_error is None):
+            self._base_error = exc
+
+        self._propagate_cancellation_error = \
+            exc if et is exceptions.CancelledError else None
+        if self._parent_cancel_requested:
+            # If this flag is set we *must* call uncancel().
+            if self._parent_task.uncancel() == 0:
+                # If there are no pending cancellations left,
+                # don't propagate CancelledError.
+                self._propagate_cancellation_error = None
+
+        if et is not None:
+            if not self._aborting:
+                # Our parent task is being cancelled:
+                #
+                #    async with TaskGroup() as g:
+                #        g.create_task(...)
+                #        await ...  # <- CancelledError
+                #
+                # or there's an exception in "async with":
+                #
+                #    async with TaskGroup() as g:
+                #        g.create_task(...)
+                #        1 / 0
+                #
+                self._abort()
+
+        await_all_task = self._loop.create_task(self._await_all())
+        self.add_awaiter(await_all_task)
+        await await_all_task
 
         assert not self._tasks
 
@@ -132,8 +143,8 @@ class TaskGroup:
 
         # Propagate CancelledError if there is one, except if there
         # are other errors -- those have priority.
-        if propagate_cancellation_error and not self._errors:
-            raise propagate_cancellation_error
+        if self._propagate_cancellation_error and not self._errors:
+            raise self._propagate_cancellation_error
 
         if et is not None and et is not exceptions.CancelledError:
             self._errors.append(exc)
@@ -166,6 +177,7 @@ class TaskGroup:
         tasks._set_task_name(task, name)
         task.add_done_callback(self._on_task_done)
         self._tasks.add(task)
+        task.add_awaiter(self)
         return task
 
     # Since Python 3.8 Tasks propagate all exceptions correctly,
@@ -234,3 +246,38 @@ class TaskGroup:
             self._abort()
             self._parent_cancel_requested = True
             self._parent_task.cancel()
+
+    def makeAsyncGraphNodes(self):
+        if self._exiting:
+            node = asyncgraph.AsyncGraphNodeAsyncGraphAwaitable(self)
+            return node, node
+
+        # If we're not exiting then nothing is awaiting this overall group.
+        # This typically happens when an 'await' appears within the TaskGroup
+        # context-manager scope. There isn't much we can do for now except link
+        # directly to the parent task, but we can produce an error node which
+        # indicates the stack trace of the "rouge" await.
+        yf_target = self._parent_task.get_coro()
+        text = (f"Unclosed TaskGroup from task: {self._parent_task}\n" +
+            "Probably caused by an 'await' in the TaskGroup with task-relative trace:")
+        while yf_target is not None:
+            if isinstance(yf_target, asyncgraph.AsyncGraphAwaitable):
+                break
+            if not hasattr(yf_target, 'yield_from'):
+                text += f"Untraversable object: {self.obj} {type(self.obj)}"
+                break
+            if type(yf_target) is types.CoroutineType:
+                frame = yf_target.cr_frame
+            elif type(yf_target) is types.GeneratorType:
+                frame = yf_target.gi_frame
+            elif type(yf_target) is types.AsyncGeneratorType:
+                frame = yf_target.ag_frame
+            else:
+                frame is None
+            if frame is not None:
+                text += f"\n  {frame}"
+            yf_target = yf_target.yield_from()
+
+        node = asyncgraph.AsyncGraphNodeError(
+                text, self._parent_task.get_awaiters())
+        return node, node

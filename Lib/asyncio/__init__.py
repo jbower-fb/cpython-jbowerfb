@@ -5,6 +5,7 @@
 import sys
 
 # This relies on each of the submodules having an __all__ variable.
+from .asyncgraph import *
 from .base_events import *
 from .coroutines import *
 from .events import *
@@ -22,7 +23,8 @@ from .timeouts import *
 from .threads import *
 from .transports import *
 
-__all__ = (base_events.__all__ +
+__all__ = (asyncgraph.__all__ +
+           base_events.__all__ +
            coroutines.__all__ +
            events.__all__ +
            exceptions.__all__ +

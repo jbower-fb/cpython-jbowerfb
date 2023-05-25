@@ -10,6 +10,7 @@ import logging
 import sys
 from types import GenericAlias
 
+from . import asyncgraph
 from . import base_futures
 from . import events
 from . import exceptions
@@ -27,7 +28,7 @@ _FINISHED = base_futures._FINISHED
 STACK_DEBUG = logging.DEBUG - 1  # heavy-duty debugging
 
 
-class Future:
+class Future(asyncgraph.AsyncGraphAwaitable):
     """This class is *almost* compatible with concurrent.futures.Future.
 
     Differences:
@@ -76,6 +77,9 @@ class Future:
         loop object used by the future. If it's not provided, the future uses
         the default event loop.
         """
+
+        super().__init__()
+
         if loop is None:
             self._loop = events.get_event_loop()
         else:
@@ -281,6 +285,10 @@ class Future:
         self.__schedule_callbacks()
         self.__log_traceback = True
 
+    def makeAsyncGraphNodes(self):
+        node = asyncgraph.AsyncGraphNodeAsyncGraphAwaitable(self)
+        return node, node
+
     def __await__(self):
         if not self.done():
             self._asyncio_future_blocking = True
@@ -419,10 +427,10 @@ def wrap_future(future, *, loop=None):
     return new_future
 
 
-try:
-    import _asyncio
-except ImportError:
-    pass
-else:
-    # _CFuture is needed for tests.
-    Future = _CFuture = _asyncio.Future
+# try:
+#     import _asyncio
+# except ImportError:
+#     pass
+# else:
+#     # _CFuture is needed for tests.
+#     Future = _CFuture = _asyncio.Future

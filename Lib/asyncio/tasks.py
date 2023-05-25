@@ -20,6 +20,7 @@ import warnings
 import weakref
 from types import GenericAlias
 
+from . import asyncgraph
 from . import base_tasks
 from . import coroutines
 from . import events
@@ -38,6 +39,10 @@ def current_task(loop=None):
     if loop is None:
         loop = events.get_running_loop()
     return _current_tasks.get(loop)
+
+# Hack to resolve circular dependency with asyncgraph. Hopefully this can go
+# away with gh-80788.
+asyncgraph._current_task = current_task
 
 
 def all_tasks(loop=None):
@@ -321,6 +326,8 @@ class Task(futures._PyFuture):  # Inherit Python Task implementation
         except BaseException as exc:
             super().set_exception(exc)
         else:
+            if isinstance(result, asyncgraph.AsyncGraphAwaitable):
+                result.add_awaiter(self)
             blocking = getattr(result, '_asyncio_future_blocking', None)
             if blocking is not None:
                 # Yielded Future must come from Future.__iter__().
@@ -386,17 +393,56 @@ class Task(futures._PyFuture):  # Inherit Python Task implementation
             self.__step()
         self = None  # Needed to break cycles when an exception occurs.
 
+    def makeAsyncGraphNodes(self):
+        yf_target = self.get_coro()
+        node_chain = []
+        head_node = None
+        tail_node = None
+        while yf_target is not None:
+            if isinstance(yf_target, asyncgraph.AsyncGraphAwaitable):
+                break
+            if not hasattr(yf_target, 'yield_from'):
+                node = asyncgraph.AsyncGraphNodeError(
+                        f"Untraversable object: {self.obj} {type(self.obj)}")
+                node_chain.append(node)
+                break
+            if type(yf_target) is types.CoroutineType:
+                frame = yf_target.cr_frame
+            elif type(yf_target) is types.GeneratorType:
+                frame = yf_target.gi_frame
+            elif type(yf_target) is types.AsyncGeneratorType:
+                frame = yf_target.ag_frame
+            else:
+                frame is None
+            if frame is not None:
+                frame_node = asyncgraph.AsyncGraphNodeFrame(frame)
+                node_chain.append(frame_node)
+            yf_target = yf_target.yield_from()
+        for node in reversed(node_chain):
+            if head_node is None:
+                head_node = node
+            if tail_node is not None:
+                tail_node.awaited_by.add(node)
+            tail_node = node
+
+        node = asyncgraph.AsyncGraphNodeAsyncGraphAwaitable(self)
+        if head_node is None:
+            head_node = node
+        if tail_node is not None:
+            tail_node.awaited_by.add(node)
+
+        return node, head_node
 
 _PyTask = Task
 
 
-try:
-    import _asyncio
-except ImportError:
-    pass
-else:
-    # _CTask is needed for tests.
-    Task = _CTask = _asyncio.Task
+# try:
+#     import _asyncio
+# except ImportError:
+#     pass
+# else:
+#     # _CTask is needed for tests.
+#     Task = _CTask = _asyncio.Task
 
 
 def create_task(coro, *, name=None, context=None):
@@ -702,6 +748,9 @@ class _GatheringFuture(futures.Future):
         super().__init__(loop=loop)
         self._children = children
         self._cancel_requested = False
+        for child in children:
+            if isinstance(child, asyncgraph.AsyncGraphAwaitable):
+                child.add_awaiter(self)
 
     def cancel(self, msg=None):
         if self.done():

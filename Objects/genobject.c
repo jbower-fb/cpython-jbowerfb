@@ -346,12 +346,15 @@ _PyGen_yf(PyGenObject *gen)
             return NULL;
         }
         _Py_CODEUNIT next = frame->prev_instr[1];
-        if (next.op.code != RESUME || next.op.arg < 2)
+        if (((next.op.code == RESUME || next.op.code == INSTRUMENTED_RESUME) && next.op.arg >= 2) ||
+                next.op.code == YIELD_VALUE || next.op.code == INSTRUMENTED_YIELD_VALUE)
         {
+            yf = Py_NewRef(_PyFrame_StackPeek(frame));
+        }
+        else {
             /* Not in a yield from */
             return NULL;
         }
-        yf = Py_NewRef(_PyFrame_StackPeek(frame));
     }
 
     return yf;
@@ -782,6 +785,18 @@ static PyMemberDef gen_memberlist[] = {
     {NULL}      /* Sentinel */
 };
 
+PyDoc_STRVAR(yield_from_doc,
+"gen.yield_from() -> awaitable this generator has yielded from or None");
+
+static PyObject *
+gen_yield_from(PyObject *gen, void *Py_UNUSED(ignored))
+{
+    PyObject *yf = _PyGen_yf((PyGenObject *) gen);
+    if (yf == NULL)
+        Py_RETURN_NONE;
+    return yf;
+}
+
 static PyObject *
 gen_sizeof(PyGenObject *gen, PyObject *Py_UNUSED(ignored))
 {
@@ -799,6 +814,7 @@ static PyMethodDef gen_methods[] = {
     {"send",(PyCFunction)gen_send, METH_O, send_doc},
     {"throw",_PyCFunction_CAST(gen_throw), METH_FASTCALL, throw_doc},
     {"close",(PyCFunction)gen_close, METH_NOARGS, close_doc},
+    {"yield_from",(PyCFunction)gen_yield_from, METH_NOARGS, yield_from_doc},
     {"__sizeof__", (PyCFunction)gen_sizeof, METH_NOARGS, sizeof__doc__},
     {NULL, NULL}        /* Sentinel */
 };
@@ -1151,6 +1167,7 @@ static PyMethodDef coro_methods[] = {
     {"send",(PyCFunction)gen_send, METH_O, coro_send_doc},
     {"throw",_PyCFunction_CAST(gen_throw), METH_FASTCALL, coro_throw_doc},
     {"close",(PyCFunction)gen_close, METH_NOARGS, coro_close_doc},
+    {"yield_from",(PyCFunction)gen_yield_from, METH_NOARGS, yield_from_doc},
     {"__sizeof__", (PyCFunction)gen_sizeof, METH_NOARGS, sizeof__doc__},
     {NULL, NULL}        /* Sentinel */
 };
@@ -1247,6 +1264,12 @@ coro_wrapper_close(PyCoroWrapper *cw, PyObject *args)
     return gen_close((PyGenObject *)cw->cw_coroutine, args);
 }
 
+static PyObject *
+coro_wrapper_yield_from(PyCoroWrapper *cw, PyObject *args)
+{
+    return gen_yield_from((PyObject *)cw->cw_coroutine, NULL);
+}
+
 static int
 coro_wrapper_traverse(PyCoroWrapper *cw, visitproc visit, void *arg)
 {
@@ -1259,6 +1282,7 @@ static PyMethodDef coro_wrapper_methods[] = {
     {"throw",_PyCFunction_CAST(coro_wrapper_throw),
     METH_FASTCALL, coro_throw_doc},
     {"close",(PyCFunction)coro_wrapper_close, METH_NOARGS, coro_close_doc},
+    {"yield_from",(PyCFunction)coro_wrapper_yield_from, METH_NOARGS, yield_from_doc},
     {NULL, NULL}        /* Sentinel */
 };
 
@@ -1836,11 +1860,18 @@ async_gen_asend_close(PyAsyncGenASend *o, PyObject *args)
     Py_RETURN_NONE;
 }
 
+static PyObject *
+async_gen_yield_from(PyAsyncGenASend *o, PyObject *args)
+{
+    return gen_yield_from((PyObject *)o->ags_gen, NULL);
+}
+
 
 static PyMethodDef async_gen_asend_methods[] = {
     {"send", (PyCFunction)async_gen_asend_send, METH_O, send_doc},
     {"throw", _PyCFunction_CAST(async_gen_asend_throw), METH_FASTCALL, throw_doc},
     {"close", (PyCFunction)async_gen_asend_close, METH_NOARGS, close_doc},
+    {"yield_from",(PyCFunction)async_gen_yield_from, METH_NOARGS, yield_from_doc},
     {NULL, NULL}        /* Sentinel */
 };
 
@@ -2252,12 +2283,19 @@ async_gen_athrow_close(PyAsyncGenAThrow *o, PyObject *args)
     Py_RETURN_NONE;
 }
 
+static PyObject *
+async_gen_athrow_yield_from(PyAsyncGenAThrow *o, PyObject *args)
+{
+    return gen_yield_from((PyObject*)o->agt_gen, NULL);
+}
+
 
 static PyMethodDef async_gen_athrow_methods[] = {
     {"send", (PyCFunction)async_gen_athrow_send, METH_O, send_doc},
     {"throw", _PyCFunction_CAST(async_gen_athrow_throw),
     METH_FASTCALL, throw_doc},
     {"close", (PyCFunction)async_gen_athrow_close, METH_NOARGS, close_doc},
+    {"yield_from",(PyCFunction)async_gen_athrow_yield_from, METH_NOARGS, yield_from_doc},
     {NULL, NULL}        /* Sentinel */
 };
 
